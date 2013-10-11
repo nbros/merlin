@@ -180,10 +180,8 @@ module Protocol_io = struct
       Request (Tell (`Definitions d))
     | [`String "tell"; `String "source"; `String source] ->
       Request (Tell (`Source source))
-    | [`String "tell"; `String "more"; `String source] ->
-      Request (Tell (`More source))
-    | [`String "tell"; `String "end"] ->
-      Request (Tell `End)
+    | [`String "tell"; `String "module"] ->
+      Request Tell_module
     | (`String "type" :: `String "expression" :: `String expr :: opt_pos) ->
       Request (Type_expr (expr, optional_position opt_pos))
     | [`String "type"; `String "enclosing";
@@ -280,8 +278,12 @@ module Protocol_io = struct
     | Return (request, response) ->
       `List [`String "return";
       begin match request, response with
-        | Tell _, Some pos -> (pos_to_json pos)
-        | Tell _, None     -> `Null
+        | Tell _, (`Done pos) -> 
+          `Assoc ["pos", (pos_to_json pos); "done", `Bool true]
+        | Tell _, `More -> 
+          `Assoc ["done", `Bool false]
+        | Tell _, (`More_from pos) -> 
+          `Assoc ["pos", (pos_to_json pos); "done", `Bool false]
         | Type_expr _, str -> `String str
         | Type_enclosing _, results ->
           `List (List.map json_of_type_loc results)

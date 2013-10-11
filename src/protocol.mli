@@ -10,10 +10,13 @@ type completion = {
   info: string;
 }
 
+type teller = unit -> [`Source of string | `More of string |`End]
+
 type _ request =
   | Tell
-    :  [`Definitions of int | `Source of string | `More of string | `End]
-    -> position option request
+    : [`Definitions of int | `Source of string] -> (teller -> position) request
+  | Tell_module
+    : [`Done | `From of position * (unit -> teller)] request
   | Type_expr
     :  string * position option
     -> string request

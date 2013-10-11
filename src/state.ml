@@ -468,3 +468,18 @@ let validate_parser t =
     let step = History.focused steps in
     initial step
 
+let close_module t =
+  let step = History.focused t.steps in
+  let open Outline.Spine in
+  match step.outlines with
+  | Str (Str_in_module _) | Sig ( Sig_in_sig_modtype _ 
+                                | Sig_in_sig_module  _ 
+                                | Sig_in_str_modtype _ ) ->
+    let step_pos = position step.outlines in
+    let at_pos step' = step_pos <> position step'.outlines in
+    let steps' = History.seek_forward at_pos t.steps in
+    let t' = {t with steps = steps'} in
+    if at_pos (History.focused steps')
+    then `Successful t'
+    else `Failed t'
+  | _ -> `Unneeded

@@ -67,3 +67,5 @@ val local_modules_at : t -> Lexing.position -> string Location.loc list
 val str_items_before : t -> Lexing.position -> Typedtree.structure Asttypes.loc list
 
 val exns : t -> exn list
+
+val close_module : t -> [`Unneeded | `Successful of t | `Failed of t]

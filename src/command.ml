@@ -113,7 +113,7 @@ let position state = (location state).Location.loc_end
 let new_step outline steps =
   History.insert (State.step (History.focused steps) outline) steps
 
-let tell i o state request number_of_definitions source =
+let tell i o state request ?(stop_at=(-1)) ?(number_of_definitions=0) source =
   Env.reset_cache_toplevel ();
   let number_of_definitions = ref number_of_definitions in
   let eod = ref false and eot = ref false in
@@ -121,7 +121,7 @@ let tell i o state request number_of_definitions source =
     begin fun () ->
       if !eot then ""
       else try
-        o (Return (request, None));
+        o (Return (request, `More));
         let request = Stream.next i in
         match request with
         | Request (Tell (`Source source)) -> source
@@ -144,7 +144,12 @@ let tell i o state request number_of_definitions source =
     in
     if !eod && not first then decr number_of_definitions;
     let finished =
-      (!eod && !number_of_definitions <= 0) || (!eot && (stuck || tokens' = []))
+      (* Was fed with Enough definitions *)
+      (!eod && !number_of_definitions <= 0) ||
+      (* Reached expected position *)
+      (Option.map Outline.Spine.position outline = Some stop_at) ||
+      (* Reached end of buffer *)
+      (!eot && (stuck || tokens' = []))
     in
     if finished
     then None, outline
@@ -178,7 +183,7 @@ let tell i o state request number_of_definitions source =
     | _ -> loop steps (Some [])
   in
   let state = {state with steps = first state.steps} in
-  state, Some (position state)
+  state, `Done (position state)
 
 
 let dispatch (i,o : IO.io) (state : state) =
@@ -187,9 +192,18 @@ let dispatch (i,o : IO.io) (state : state) =
   let step = History.focused state.steps in
   (match request with
   | (Tell (`Source source) : a request) ->
-    tell i o state request 0 source
-  | (Tell (`Definitions defs) : a request) ->
-    tell i o state request defs ""
+    tell i o state request source
+  | (Tell (`Definitions number_of_definitions) : a request) ->
+    tell i o state request ~number_of_definitions "" 
+  | (Tell `Close_module : a request) ->
+    begin match State.close_module state with
+      | `Unneeded -> state, `Done (position state)
+      | `Successful _ -> state, `Done (position state)
+      | `Failed state' ->
+        let stop_at = Outline.Spine.position step.outlines in
+        tell i o state' request ~stop_at ""
+    end
+
   | (Tell _ : a request) -> IO.invalid_arguments ()
   | (Type_expr (source, None) : a request) ->
     let env = Typer.env (History.focused state.steps).types in
