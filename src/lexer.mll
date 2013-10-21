@@ -260,6 +260,9 @@ let float_literal =
   (['e' 'E'] ['+' '-']? ['0'-'9'] ['0'-'9' '_']*)?
 
 rule token = parse
+  | newline "#" ("if"|"else"|"endif"|"use"|"load"|"require")
+      { update_loc lexbuf None 1 false 0;
+        top_directive lexbuf ; token lexbuf }
   | newline
       { update_loc lexbuf None 1 false 0;
         token lexbuf
@@ -449,6 +452,10 @@ rule token = parse
       { raise (Error(Illegal_character (Lexing.lexeme_char lexbuf 0),
                      Location.curr lexbuf))
       }
+
+and top_directive = parse
+  | newline { update_loc lexbuf None 1 false 0 }
+  | _ { top_directive lexbuf }
 
 and comment = parse
     "(*"
