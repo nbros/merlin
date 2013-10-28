@@ -32,13 +32,12 @@ open Std
     (* Untyped stream *)
 type low_io = Json.json Stream.t * (Json.json -> unit)
     (* Protocol-typed stream, threading a state of type 's *)
-type 's io    = 's Protocol.a_request Stream.t * ('s Protocol.response -> 's -> 's)
-type low_io   = Json.json Stream.t * (Json.json -> unit)
+type 's io  = 's Protocol.a_request Stream.t * ('s Protocol.response -> 's -> 's)
 
 (* Initialize protocol codec from a input and an output channel *)
 val make : input:in_channel -> output:out_channel -> low_io
 (* Add types *)
-val lift : low_io -> io
+val lift : low_io -> 's io
 
 (* Select between different serialization protocols *)
 type io_maker = input:in_channel -> output:out_channel -> low_io

@@ -273,11 +273,11 @@ module Protocol_io = struct
     fun () ->
     o (`List [`String "return"; !tell]);
     tell := tell_me_more;
-	  match Stream.next i with
+    match Stream.next i with
     | `List [`String "tell"; `String "source"; `String source] -> `Source source
     | `List [`String "tell"; `String "more"; `String source]   -> `More source
     | `List [`String "tell"; `String "end"]                    -> `End
-		| _ -> invalid_arguments ()
+    | _ -> invalid_arguments ()
 
   let response_to_json (type s) (io : low_io) (state : s ref) (r : s Protocol.response) = 
     match r with
@@ -292,7 +292,7 @@ module Protocol_io = struct
       `List [`String "return";
       begin match request, response with
         | Tell _, f ->
-					let state', pos = f (teller ~first:tell_me_more io) !state in
+          let state', pos = f (teller ~first:tell_me_more io) !state in
           state := state';
           `Assoc ["pos", (pos_to_json pos); "done", `Bool true]
         | Tell_module, (`Done pos) ->

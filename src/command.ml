@@ -397,11 +397,10 @@ let dispatch (type a) (request : (state,a) request) (state : state) =
     let dir = Filename.dirname name in
     let filename = Filename.basename name in
     Project.set_local_path dir;
-    State.initial_str name, ()
+    State.initial_str filename, ()
 
   | (Refresh `Full : (state, a) request) ->
     Project.flush_global_modules ();
-    State.reset_global_modules ();
     Env.reset_cache ();
     State.retype state, true
 
@@ -411,7 +410,7 @@ let dispatch (type a) (request : (state,a) request) (state : state) =
   | (Errors : (state, a) request) ->
     state, State.exns state
 
-  | (Dump (`Env None) : (state, a) request) ->
+  | (Dump (`Env (kind, None)) : (state, a) request) ->
     let sg = Browse_misc.signature_of_env 
               ~ignore_extensions:(kind = `Normal) 
               (Typer.env step.types)
@@ -565,8 +564,7 @@ let dispatch (type a) (request : (state,a) request) (state : state) =
     state, Path_list.to_strict_list Project.source_path
 
   | (Path_reset : (state, a) request) ->
-    Project.reset ();
-    State.reset_global_modules ();
+    Project.reset_user ();
     state, ()
 
   : state * a)

@@ -207,8 +207,8 @@ and expression { exp_desc ; exp_loc ; exp_extra ; exp_type ; exp_env } =
     | Texp_object (cls,_) -> class_structure ~env:exp_env cls
     | Texp_new _
     | Texp_instvar _ -> [] (*FIXME*)
-		| Texp_record _ | Texp_construct _ | Texp_setfield _ | Texp_field _ as expr ->
-			List.map ~f:expression (Merlin_types.extract_specific_subexpressions expr)
+    | Texp_record _ | Texp_construct _ | Texp_setfield _ | Texp_field _ as expr ->
+      List.map ~f:expression (Merlin_types.extract_specific_subexpressions expr)
   in
   List.fold_left exp_extra ~f:(expression_extra ~env:exp_env) ~init:{
     loc = exp_loc ;
