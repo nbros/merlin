@@ -28,8 +28,8 @@
 
 open Std
 
-type io = Protocol.a_request Stream.t * (Protocol.response -> unit)
-type low_io = Json.json Stream.t * (Json.json -> unit)
+type 's io    = 's Protocol.a_request Stream.t * ('s Protocol.response -> 's -> 's)
+type low_io   = Json.json Stream.t * (Json.json -> unit)
 type io_maker = input:in_channel -> output:out_channel -> low_io
 
 let section = Logger.(`protocol)
@@ -180,8 +180,8 @@ module Protocol_io = struct
       Request (Tell (`Definitions d))
     | [`String "tell"; `String "source"; `String source] ->
       Request (Tell (`Source source))
-    | [`String "tell"; `String "module"] ->
-      Request Tell_module
+    (*| [`String "tell"; `String "module"] ->
+      Request Tell_module*)
     | (`String "type" :: `String "expression" :: `String expr :: opt_pos) ->
       Request (Type_expr (expr, optional_position opt_pos))
     | [`String "type"; `String "enclosing";
@@ -267,7 +267,16 @@ module Protocol_io = struct
       Request (Project_load (load_or_find action, path))
     | _ -> invalid_arguments ()
 
-  let response_to_json = function
+	let teller (i,o : low_io) () =
+    o (`List [`String "return"; `Null]);
+	  match Stream.next i with
+    | `List [`String "tell"; `String "source"; `String source] -> `Source source
+    | `List [`String "tell"; `String "more"; `String source]   -> `More source
+    | `List [`String "tell"; `String "end"]                    -> `End
+		| _ -> invalid_arguments ()
+
+  let response_to_json (type s) (io : low_io) (state : s ref) (r : s Protocol.response) = 
+    match r with
     | Failure s | Exception (Failure' s) -> `List [`String "failure"; `String s]
     | Error error -> `List [`String "error"; error]
     | Exception exn ->
@@ -278,12 +287,10 @@ module Protocol_io = struct
     | Return (request, response) ->
       `List [`String "return";
       begin match request, response with
-        | Tell _, (`Done pos) -> 
+        | Tell _, f ->
+					let state', pos = f (teller io) !state in
+          state := state';
           `Assoc ["pos", (pos_to_json pos); "done", `Bool true]
-        | Tell _, `More -> 
-          `Assoc ["done", `Bool false]
-        | Tell _, (`More_from pos) -> 
-          `Assoc ["pos", (pos_to_json pos); "done", `Bool false]
         | Type_expr _, str -> `String str
         | Type_enclosing _, results ->
           `List (List.map json_of_type_loc results)
@@ -329,6 +336,8 @@ end
 (* Used when dumping state as raw json *)
 let with_location = Protocol_io.with_location
 
-let lift (i,o : low_io) : io =
-  (Stream.map ~f:Protocol_io.request_of_json i,
-   (fun x -> o (Protocol_io.response_to_json x)))
+let lift (i,o as io : low_io) : 's io =
+  (Stream.map i ~f:Protocol_io.request_of_json, 
+   (fun x s -> let s = ref s in
+               o (Protocol_io.response_to_json io s x);
+               !s))

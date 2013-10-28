@@ -26,4 +26,7 @@
 
 )* }}} *)
 
-val dispatch : IO.io -> State.t -> 'a Protocol.request -> State.t * 'a
+val dispatch 
+  : (State.t, 'a) Protocol.request
+  -> State.t
+  -> State.t * 'a

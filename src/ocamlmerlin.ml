@@ -84,18 +84,30 @@
 module My_config = My_config
 
 let signal behavior =
+  (* Catch failures on windows (huge work :P) *)
   try Sys.signal Sys.sigusr1 behavior
   with Invalid_argument "Sys.signal: unavailable signal" ->
     Sys.Signal_default
 
-let refresh_state_on_signal state f =
-  let previous =
-    signal (Sys.Signal_handle (fun _ ->
-        try state := fst (State.quick_refresh_modules !state)
-        with _ -> ()
-      ))
-  in
-  Misc.try_finally f (fun () -> ignore (signal previous))
+module Refresh = struct
+  let scheduled = ref false
+  
+  let schedule _ = scheduled := true
+
+  let on_signal state f =
+    if !scheduled then
+      (state     := fst (State.quick_refresh_modules !state);
+        scheduled := false);
+    let catch _ =
+      try state := fst (State.quick_refresh_modules !state)
+      with _ -> ()
+    in
+    let previous = signal (Sys.Signal_handle catch) in
+    Misc.try_finally f (fun () -> ignore (signal previous))
+
+  (* Setup refresh *)
+  let () = ignore (signal (Sys.Signal_handle schedule))
+end
 
 let main_loop () =
   let input, output as io = IO.(lift (make ~input:stdin ~output:stdout)) in
@@ -105,7 +117,7 @@ let main_loop () =
         let state' = ref state in
         try
           let Protocol.Request request =
-            refresh_state_on_signal state' (fun () -> Stream.next input)
+            Refresh.on_signal state' (fun () -> Stream.next input)
           in
           let state = State.validate_parser !state' in
           let state, response = Command.dispatch io state request in
@@ -115,14 +127,12 @@ let main_loop () =
           | Stream.Failure as exn -> raise exn
           | exn -> !state', Protocol.Exception exn
       in
-      (try output answer
-       with exn -> output (Protocol.Exception exn));
+      let state = (try output answer state 
+                   with exn -> output (Protocol.Exception exn) state)
+      in
       loop state
     in
     loop (State.initial_str "")
   with Stream.Failure -> ()
 
-let () =
-  ignore (signal Sys.Signal_ignore);
-  main_loop ()
-
+let () = main_loop ()

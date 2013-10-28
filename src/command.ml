@@ -113,7 +113,7 @@ let position state = (location state).Location.loc_end
 let new_step outline steps =
   History.insert (State.step (History.focused steps) outline) steps
 
-let tell i o state request ?(stop_at=(-1)) ?(number_of_definitions=0) source =
+let tell request ?(stop_at=(-1)) ?(number_of_definitions=0) source teller state =
   Env.reset_cache_toplevel ();
   let number_of_definitions = ref number_of_definitions in
   let eod = ref false and eot = ref false in
@@ -121,13 +121,10 @@ let tell i o state request ?(stop_at=(-1)) ?(number_of_definitions=0) source =
     begin fun () ->
       if !eot then ""
       else try
-        o (Return (request, `More));
-        let request = Stream.next i in
-        match request with
-        | Request (Tell (`Source source)) -> source
-        | Request (Tell (`More source)) -> eod := true; source
-        | Request (Tell `End) -> eot := true; ""
-        | _ -> IO.invalid_arguments ()
+        match teller () with
+        | `Source source -> source
+        | `More source -> eod := true; source
+        | `End -> eot := true; ""
       with
         Stream.Failure -> IO.invalid_arguments ()
     end
@@ -183,41 +180,37 @@ let tell i o state request ?(stop_at=(-1)) ?(number_of_definitions=0) source =
     | _ -> loop steps (Some [])
   in
   let state = {state with steps = first state.steps} in
-  state, `Done (position state)
+  state, (position state)
 
-
-let dispatch (i,o : IO.io) (state : state) =
-  fun (type a) (request : a request) ->
+let dispatch (type a) (request : (state,a) request) (state : state) =
   track_verbosity state (Request request);
   let step = History.focused state.steps in
   (match request with
-  | (Tell (`Source source) : a request) ->
-    tell i o state request source
-  | (Tell (`Definitions number_of_definitions) : a request) ->
-    tell i o state request ~number_of_definitions "" 
-  | (Tell `Close_module : a request) ->
+  | (Tell (`Source source) : (state, a) request) ->
+    state, tell request source
+  | (Tell (`Definitions number_of_definitions) : (state, a) request) ->
+    state, tell request ~number_of_definitions "" 
+  (*| (Tell `Close_module : (state, a) request) ->
     begin match State.close_module state with
       | `Unneeded -> state, `Done (position state)
       | `Successful _ -> state, `Done (position state)
       | `Failed state' ->
         let stop_at = Outline.Spine.position step.outlines in
         tell i o state' request ~stop_at ""
-    end
-
-  | (Tell _ : a request) -> IO.invalid_arguments ()
-  | (Type_expr (source, None) : a request) ->
+    end*)
+  | (Type_expr (source, None) : (state, a) request) ->
     let env = Typer.env (History.focused state.steps).types in
     let ppf, to_string = Format.to_string () in
     Type_utils.type_in_env env ppf source;
     state, to_string ()
 
-  | (Type_expr (source, Some pos) : a request) ->
+  | (Type_expr (source, Some pos) : (state, a) request) ->
     let {Browse.env} = State.node_at state pos in
     let ppf, to_string = Format.to_string () in
     Type_utils.type_in_env env ppf source;
     state, to_string ()
 
-  | (Type_enclosing ((expr, offset), pos) : a request) ->
+  | (Type_enclosing ((expr, offset), pos) : (state, a) request) ->
     let aux = function
       | {Browse. loc; env;
           context = (Browse.Expr t | Browse.Pattern (_, t) | Browse.Type t)} ->
@@ -281,17 +274,17 @@ let dispatch (i,o : IO.io) (state : state) =
     in
     state, small_enclosings @ result
 
-  | (Complete_prefix (prefix, None) : a request) ->
+  | (Complete_prefix (prefix, None) : (state, a) request) ->
     let node = Browse.({dummy with env = Typer.env step.types}) in
     let compl = State.node_complete node prefix in
     state, List.rev compl
 
-  | (Complete_prefix (prefix, Some pos) : a request) ->
+  | (Complete_prefix (prefix, Some pos) : (state, a) request) ->
     let node = State.node_at state pos in
     let compl = State.node_complete node prefix in
     state, List.rev compl
 
-  | (Locate (path, opt_pos) : a request) ->
+  | (Locate (path, opt_pos) : (state, a) request) ->
     let node, local_modules, local_defs =
       match opt_pos with
       | None -> Browse.({ dummy with env = Typer.env step.types }), [], []
@@ -318,14 +311,14 @@ let dispatch (i,o : IO.io) (state : state) =
       state, Some (file, pos)
     end
 
-  | (Drop : a request) ->
+  | (Drop : (state, a) request) ->
     let state = {state with steps = History.modify (fun x -> x) state.steps} in
     state, position state
 
-  | (Seek `Position : a request) ->
+  | (Seek `Position : (state, a) request) ->
     state, position state
 
-  | (Seek (`Before pos) : a request) ->
+  | (Seek (`Before pos) : (state, a) request) ->
     let inv step = Outline.invalid step.outlines in
     let cmp step = Merlin_parsing.compare_pos pos (Outline.location step.outlines) in
     let steps = state.steps in
@@ -339,7 +332,7 @@ let dispatch (i,o : IO.io) (state : state) =
     let state = {state with steps} in
     state, position state
 
-  | (Seek (`Exact pos) : a request) ->
+  | (Seek (`Exact pos) : (state, a) request) ->
     let inv step = Outline.invalid step.outlines in
     let cmp step = Merlin_parsing.compare_pos pos (Outline.location step.outlines) in
     let steps = state.steps in
@@ -348,13 +341,13 @@ let dispatch (i,o : IO.io) (state : state) =
     let state = {state with steps} in
     state, position state
 
-  | (Seek `End : a request) ->
+  | (Seek `End : (state, a) request) ->
     let steps = state.steps in
     let steps = History.seek_forward (fun _ -> true) steps in
     let state = {state with steps} in
     state, position state
 
-  | (Seek `Maximize_scope : a request) ->
+  | (Seek `Maximize_scope : (state, a) request) ->
     let rec loop steps =
       let steps' = History.move 1 steps in
       if Outline.Spine.position (History.focused steps').outlines <=
@@ -366,7 +359,7 @@ let dispatch (i,o : IO.io) (state : state) =
     let state = {state with steps} in
     state, position state
 
-  | (Boundary (dir,pos) : a request) ->
+  | (Boundary (dir,pos) : (state, a) request) ->
     let count = match dir with
       | `Next    -> 1
       | `Prev    -> -1
@@ -395,30 +388,34 @@ let dispatch (i,o : IO.io) (state : state) =
       Some (Outline.location (History.focused steps).outlines)
     end
 
-  | (Reset None : a request) ->
+  | (Reset None : (state, a) request) ->
     Env.reset_cache ();
     State.initial_str "", ()
 
-  | (Reset (Some name) : a request) ->
+  | (Reset (Some name) : (state, a) request) ->
     Env.reset_cache ();
     let dir = Filename.dirname name in
     let filename = Filename.basename name in
     Project.set_local_path dir;
-    State.initial_str filename, ()
+    State.initial_str name, ()
 
-  | (Refresh `Full : a request) ->
+  | (Refresh `Full : (state, a) request) ->
     Project.flush_global_modules ();
+    State.reset_global_modules ();
     Env.reset_cache ();
     State.retype state, true
 
-  | (Refresh `Quick : a request) ->
+  | (Refresh `Quick : (state, a) request) ->
     State.quick_refresh_modules state
 
-  | (Errors : a request) ->
+  | (Errors : (state, a) request) ->
     state, State.exns state
 
-  | (Dump (`Env (kind, None)) : a request) ->
-    let sg = Browse_misc.signature_of_env ~ignore_extensions:(kind = `Normal) (Typer.env step.types) in
+  | (Dump (`Env None) : (state, a) request) ->
+    let sg = Browse_misc.signature_of_env 
+              ~ignore_extensions:(kind = `Normal) 
+              (Typer.env step.types)
+    in
     let aux item =
       let ppf, to_string = Format.to_string () in
       Printtyp.signature ppf [item];
@@ -433,7 +430,7 @@ let dispatch (i,o : IO.io) (state : state) =
     in
     state, `List (List.map aux sg)
 
-  | (Dump (`Env (kind, Some pos)) : a request) ->
+  | (Dump (`Env (kind, Some pos)) : (state, a) request) ->
     let {Browse.env} = State.node_at state pos in
     let sg = Browse_misc.signature_of_env ~ignore_extensions:(kind = `Normal) env in
     let aux item =
@@ -450,7 +447,7 @@ let dispatch (i,o : IO.io) (state : state) =
     in
     state, `List (List.map ~f:aux sg)
 
-  | (Dump `Sig : a request) ->
+  | (Dump `Sig : (state, a) request) ->
       let trees = Typer.trees step.types in
       let sg = List.concat_map ~f:(fun {Location.txt} -> txt.Typedtree.str_type) trees in
       let aux item =
@@ -467,18 +464,18 @@ let dispatch (i,o : IO.io) (state : state) =
       in
       state, `List (List.map ~f:aux sg)
 
-  | (Dump `Chunks : a request) ->
+  | (Dump `Chunks : (state, a) request) ->
     let pr_item_desc items = List.map
         (fun s -> `String s)
         (Chunk.Spine.dump items)
     in
     state, `List (pr_item_desc (History.focused state.steps).chunks)
 
-  | (Dump `Tree : a request) ->
+  | (Dump `Tree : (state, a) request) ->
     let structures = State.browse step in
     state, Browse_misc.dump_ts structures
 
-  | (Dump `Outline : a request) ->
+  | (Dump `Outline : (state, a) request) ->
     let print_item label _ tokens=
       let tokens =
         String.concat " "
@@ -491,7 +488,7 @@ let dispatch (i,o : IO.io) (state : state) =
     state, `List (List.map ~f:(fun s -> `String s)
                     (Outline.Spine.dump outlines
                        ~sig_item:print_item ~str_item:print_item))
-  | (Dump `History : a request) ->
+  | (Dump `History : (state, a) request) ->
     state,
     let entry s =
       let {Location. loc_start; loc_end} = Outline.location s.outlines in
@@ -511,11 +508,11 @@ let dispatch (i,o : IO.io) (state : state) =
            ;"tail", `List (List.map ~f:entry (History.tail state.steps))]
 
 
-  | (Dump `Exn : a request) ->
+  | (Dump `Exn : (state, a) request) ->
     let exns = State.exns state in
     state, `List (List.rev_map ~f:(fun e -> `String (Printexc.to_string e)) exns)
 
-  | (Which_path s : a request) ->
+  | (Which_path s : (state, a) request) ->
     let filename =
       try Misc.find_in_path_uncap Project.source_path s
       with Not_found ->
@@ -523,11 +520,11 @@ let dispatch (i,o : IO.io) (state : state) =
     in
     state, filename
 
-  | (Which_with_ext ext : a request) ->
+  | (Which_with_ext ext : (state, a) request) ->
     state, Misc.modules_in_path ~ext
             (Path_list.to_strict_list Project.source_path)
 
-  | (Project_load (cmd,path) : a request) ->
+  | (Project_load (cmd,path) : (state, a) request) ->
     let f = match cmd with
       | `File -> Dot_merlin.read
       | `Find -> Dot_merlin.find
@@ -538,37 +535,38 @@ let dispatch (i,o : IO.io) (state : state) =
     let state, _ = State.quick_refresh_modules state in
     state, (config.Dot_merlin.dot_merlins, failures)
 
-  | (Findlib_list : a request) ->
-    state, (Fl_package_base.list_packages ())
-
-  | (Findlib_use packages : a request) ->
+  | (Findlib_use packages : (state, a) request) ->
     let failures = Project.user_load_packages packages in
     let state, _ = State.quick_refresh_modules state in
     state, failures
 
-  | (Extension_list kind : a request) ->
+  | (Findlib_list : (state, a) request) ->
+    state, (Fl_package_base.list_packages ())
+
+  | (Extension_list kind : (state, a) request) ->
     state, (Extensions_utils.list kind)
 
-  | (Extension_set (action,extensions) : a request) ->
+  | (Extension_set (action,extensions) : (state, a) request) ->
     let enabled = action = `Enabled in
     List.iter extensions ~f:(Project.user_set_extension ~enabled);
     let state, _ = State.quick_refresh_modules state in
     state, ()
 
-  | (Path (var,action,pathes) : a request) ->
+  | (Path (var,action,pathes) : (state, a) request) ->
     List.iter ~f:(Project.user_path ~action ~var ?cwd:None) pathes;
     Project.flush_global_modules ();
     let state, _ = State.quick_refresh_modules state in
     state, true
 
-  | (Path_list `Build : a request) ->
+  | (Path_list `Build : (state, a) request) ->
     state, Path_list.to_strict_list Project.build_path
 
-  | (Path_list `Source : a request) ->
+  | (Path_list `Source : (state, a) request) ->
     state, Path_list.to_strict_list Project.source_path
 
-  | (Path_reset : a request) ->
-    Project.reset_user ();
+  | (Path_reset : (state, a) request) ->
+    Project.reset ();
+    State.reset_global_modules ();
     state, ()
 
   : state * a)

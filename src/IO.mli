@@ -31,8 +31,9 @@ open Std
 (* A protocol read & write a stream of Json-like objects *)
     (* Untyped stream *)
 type low_io = Json.json Stream.t * (Json.json -> unit)
-    (* Protocol-typed stream *)
-type io = Protocol.a_request Stream.t * (Protocol.response -> unit)
+    (* Protocol-typed stream, threading a state of type 's *)
+type 's io    = 's Protocol.a_request Stream.t * ('s Protocol.response -> 's -> 's)
+type low_io   = Json.json Stream.t * (Json.json -> unit)
 
 (* Initialize protocol codec from a input and an output channel *)
 val make : input:in_channel -> output:out_channel -> low_io
@@ -42,7 +43,7 @@ val lift : low_io -> io
 (* Select between different serialization protocols *)
 type io_maker = input:in_channel -> output:out_channel -> low_io
 val register_protocol : name:string -> desc:string -> io_maker -> unit
-val select_frontend : string -> unit
+val select_frontend   : string      -> unit
 
 (* Misc *)
 val invalid_arguments : unit -> 'a
