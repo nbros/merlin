@@ -180,8 +180,8 @@ module Protocol_io = struct
       Request (Tell (`Definitions d))
     | [`String "tell"; `String "source"; `String source] ->
       Request (Tell (`Source source))
-    (*| [`String "tell"; `String "module"] ->
-      Request Tell_module*)
+    | [`String "tell"; `String "module"] ->
+      Request Tell_module
     | (`String "type" :: `String "expression" :: `String expr :: opt_pos) ->
       Request (Type_expr (expr, optional_position opt_pos))
     | [`String "type"; `String "enclosing";
@@ -267,8 +267,12 @@ module Protocol_io = struct
       Request (Project_load (load_or_find action, path))
     | _ -> invalid_arguments ()
 
-	let teller (i,o : low_io) () =
-    o (`List [`String "return"; `Null]);
+  let tell_me_more = `Null
+  let teller ~first (i,o : low_io) =
+    let tell = ref first in
+    fun () ->
+    o (`List [`String "return"; !tell]);
+    tell := tell_me_more;
 	  match Stream.next i with
     | `List [`String "tell"; `String "source"; `String source] -> `Source source
     | `List [`String "tell"; `String "more"; `String source]   -> `More source
@@ -288,7 +292,15 @@ module Protocol_io = struct
       `List [`String "return";
       begin match request, response with
         | Tell _, f ->
-					let state', pos = f (teller io) !state in
+					let state', pos = f (teller ~first:tell_me_more io) !state in
+          state := state';
+          `Assoc ["pos", (pos_to_json pos); "done", `Bool true]
+        | Tell_module, (`Done pos) ->
+          `Assoc ["pos", (pos_to_json pos); "done", `Bool true]
+        | Tell_module, (`From (pos, f)) ->
+          let state', pos = 
+            f (teller ~first:(`List [`String "from"; pos_to_json pos]) io) !state
+          in
           state := state';
           `Assoc ["pos", (pos_to_json pos); "done", `Bool true]
         | Type_expr _, str -> `String str

@@ -11,13 +11,14 @@ type completion = {
 }
 
 type teller = unit -> [`Source of string | `More of string |`End]
+type 's tell = teller -> 's -> 's * position
 
 type ('s,_) request =
   | Tell
     :  [`Definitions of int | `Source of string]
-    -> ('s, (teller -> 's -> 's * position)) request
-  (*| Tell_module
-    : ('s, [`Done | `From of position * (unit -> teller)]) request*)
+    -> ('s, 's tell) request
+  | Tell_module
+    :  ('s, [`Done of position |`From of position * 's tell]) request
   | Type_expr
     :  string * position option
     -> ('s, string) request

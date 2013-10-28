@@ -54,7 +54,7 @@ module Type_utils = struct
       let open Typedtree in
       begin match str.str_items with
         | [ { str_desc = Tstr_eval exp }] ->
-            VPrinttyp.type_scheme ppf exp.exp_type;
+          VPrinttyp.type_scheme ppf exp.exp_type;
         | _ -> failwith "unhandled expression"
       end
     in
@@ -113,7 +113,7 @@ let position state = (location state).Location.loc_end
 let new_step outline steps =
   History.insert (State.step (History.focused steps) outline) steps
 
-let tell request ?(stop_at=(-1)) ?(number_of_definitions=0) source teller state =
+let tell ?(stop_at=(-1)) ?(number_of_definitions=0) source teller state =
   Env.reset_cache_toplevel ();
   let number_of_definitions = ref number_of_definitions in
   let eod = ref false and eot = ref false in
@@ -187,17 +187,17 @@ let dispatch (type a) (request : (state,a) request) (state : state) =
   let step = History.focused state.steps in
   (match request with
   | (Tell (`Source source) : (state, a) request) ->
-    state, tell request source
+    state, tell source
   | (Tell (`Definitions number_of_definitions) : (state, a) request) ->
-    state, tell request ~number_of_definitions "" 
-  (*| (Tell `Close_module : (state, a) request) ->
+    state, tell ~number_of_definitions "" 
+  | (Tell_module : (state, a) request) ->
     begin match State.close_module state with
       | `Unneeded -> state, `Done (position state)
       | `Successful _ -> state, `Done (position state)
       | `Failed state' ->
         let stop_at = Outline.Spine.position step.outlines in
-        tell i o state' request ~stop_at ""
-    end*)
+        state', `From (position state', tell ~stop_at "")
+    end
   | (Type_expr (source, None) : (state, a) request) ->
     let env = Typer.env (History.focused state.steps).types in
     let ppf, to_string = Format.to_string () in
