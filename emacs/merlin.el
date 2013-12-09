@@ -383,7 +383,9 @@ This sets `merlin-current-flags' to nil."
 
 (defun merlin-process-started-p ()
   "Return non-nil if the merlin process for the current buffer is already started."
-  (get-buffer merlin-buffer-name))
+  (and
+   (get-buffer merlin-buffer-name)
+   (equal (process-status merlin-process) 'run)))
 
 (defun merlin-kill-process ()
   "Kill the merlin process inside the buffer."
@@ -451,6 +453,7 @@ the error message otherwise print a generic error message."
   "Rewind the knowledge of merlin of the current buffer to zero."
   (interactive)
   (merlin-send-command (list 'reset 'name buffer-file-name))
+  (merlin-load-project-file)
   (merlin-error-reset)
   (setq merlin-lock-point (point-min)))
 
@@ -458,7 +461,7 @@ the error message otherwise print a generic error message."
   "Refresh changed merlin cmis."
   (interactive)
   (merlin-send-command '(refresh quick))
-  (merlin-after-save)))
+  (merlin-after-save))
 
 (defun merlin-refresh-full ()
   "Refresh all merlin cmis."
@@ -1056,7 +1059,6 @@ If QUIET is non nil, then an overlay and the merlin types can be used."
 (defun merlin-load-project-file ()
   "Load the .merlin file corresponding to the current file."
   (interactive)
-  (merlin-rewind)
   (let* ((r (merlin-send-command (list 'project 'find (buffer-file-name))))
          (failed (assoc 'failures r))
          (result (assoc 'result r)))
